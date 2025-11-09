@@ -1,47 +1,106 @@
 package ies.puerto;
 
-class BatallaPokemon {
-    atomic
-    boolean juegoTerminado = false
-    int hpPikachu = 100
-    int hpCharmander = 100
-    String turno = "Pikachu" // alternancia estricta
-    mutex m
-    cond turnoCambio
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.ReentrantLock;
 
-    procedure atacar(atacante, ref hpObjetivo):
-        daño = RandomInt(5, 20)
-        hpObjetivo = hpObjetivo - daño
-        print(atacante + " ataca con " + daño + " de daño. HP rival: " + hpObjetivo)
-        if hpObjetivo <= 0 and not juegoTerminado:
-            juegoTerminado = true
-            print(atacante + " ha ganado la batalla!")
-        Sleep(RandomInt(200, 600))
+public class Ejercicio1 {
+    private final ReentrantLock lock = new ReentrantLock();
+    private final Condition turnoCambio = lock.newCondition();
+    private volatile boolean juegoTerminado;
+    private int hpPikachu = 100;
+    private int hpCharmander = 100;
+    private String turno = "Pikachu";
 
-    runnable HiloPikachu:
-        while not juegoTerminado:
-            lock(m)
-            while turno != "Pikachu" and not juegoTerminado:
-                wait(turnoCambio, m)
-            if juegoTerminado: unlock(m); break
-            atacar("Pikachu", hpCharmander)
-            turno = "Charmander"
-            signal(turnoCambio)
-            unlock(m)
+    private void atacar(String atacante) {
+        int danio = ThreadLocalRandom.current().nextInt(5, 21);
+        if ("Pikachu".equals(atacante)) {
+            hpCharmander -= danio;
+            System.out.println("Pikachu ataca con " + danio + " de daño. HP rival: " + hpCharmander);
+            if (hpCharmander <= 0 && !juegoTerminado) {
+                juegoTerminado = true;
+                System.out.println("Pikachu ha ganado la batalla!");
+            }
+        } else {
+            hpPikachu -= danio;
+            System.out.println("Charmander ataca con " + danio + " de daño. HP rival: " + hpPikachu);
+            if (hpPikachu <= 0 && !juegoTerminado) {
+                juegoTerminado = true;
+                System.out.println("Charmander ha ganado la batalla!");
+            }
+        }
+        try {
+            Thread.sleep(ThreadLocalRandom.current().nextInt(200, 601));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
 
-    runnable HiloCharmander:
-        while not juegoTerminado:
-            lock(m)
-            while turno != "Charmander" and not juegoTerminado:
-                wait(turnoCambio, m)
-            if juegoTerminado: unlock(m); break
-            atacar("Charmander", hpPikachu)
-            turno = "Pikachu"
-            signal(turnoCambio)
-            unlock(m)
+    public void iniciarBatalla() {
+        Thread hiloPikachu = new Thread(() -> {
+            while (!juegoTerminado) {
+                lock.lock();
+                try {
+                    while (!"Pikachu".equals(turno) && !juegoTerminado) {
+                        turnoCambio.await();
+                    }
+                    if (juegoTerminado) {
+                        return;
+                    }
+                    atacar("Pikachu");
+                    turno = "Charmander";
+                    turnoCambio.signal();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                } finally {
+                    lock.unlock();
+                }
+            }
+        });
 
-    procedure main():
-        t1 = Thread.start(HiloPikachu)
-        t2 = Thread.start(HiloCharmander)
-        t1.join(); t2.join()
+        Thread hiloCharmander = new Thread(() -> {
+            while (!juegoTerminado) {
+                lock.lock();
+                try {
+                    while (!"Charmander".equals(turno) && !juegoTerminado) {
+                        turnoCambio.await();
+                    }
+                    if (juegoTerminado) {
+                        return;
+                    }
+                    atacar("Charmander");
+                    turno = "Pikachu";
+                    turnoCambio.signal();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                } finally {
+                    lock.unlock();
+                }
+            }
+        });
+
+        hiloPikachu.start();
+        hiloCharmander.start();
+
+        try {
+            hiloPikachu.join();
+            hiloCharmander.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    public boolean isJuegoTerminado() {
+        return juegoTerminado;
+    }
+
+    public int getHpPikachu() {
+        return hpPikachu;
+    }
+
+    public int getHpCharmander() {
+        return hpCharmander;
+    }
 }
